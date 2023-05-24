@@ -4,6 +4,9 @@ from firebase_admin import credentials
 from firebase_admin import firestore
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
+from functools import wraps
+from datetime import datetime
+import rsa
 import hashlib
 import base64
 import jwt
@@ -15,6 +18,7 @@ firebase_admin.initialize_app(cred)
 # Inisialisasi firestore database
 db = firestore.client()
 users_collection = db.collection('users')
+chat_collection = db.collection('chats')
 
 # Inisialisasi blueprint
 bp = Blueprint('routes', __name__)
@@ -37,43 +41,43 @@ def hash_password(password):
     return hashed_password
 
 def generate_jwt(username):
-    # Ambil data pengguna dari database berdasarkan username
-    encrypted_username = encrypt(username)
-    query = users_collection.where('username', '==', encrypted_username).limit(1).get()
-    if query:
-        user = query[0]
-        private_key = decrypt(user.get('privateKey'))
+    JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
+    payload = {'user1': username}
+    jwt_token = jwt.encode(payload, JWTkey, algorithm='HS256')
+    return jwt_token
 
-        # Gunakan privateKey sebagai kunci rahasia untuk JWT
-        payload = {'user1': username}  # Menggunakan "user1" sebagai kunci
-        jwt_token = jwt.encode(payload, private_key, algorithm='HS256')
-        return jwt_token
+def jwt_required(func):
+    @wraps(func)
+    def decorated_function(*args, **kwargs):
+        # Periksa header Authorization untuk mendapatkan token JWT
+        auth_header = request.headers.get('Authorization')
+        if auth_header:
+            auth_token = auth_header.split(' ')[1]
+            try:
+                JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
+                # Verifikasi token JWT
+                jwt.decode(auth_token, JWTkey, algorithms='HS256')
+                return func(*args, **kwargs)
+            except (jwt.exceptions.DecodeError, jwt.exceptions.InvalidTokenError):
+                return jsonify({'statusCode': 401, 'statusMessage': 'Token JWT tidak valid'})
+        else:
+            return jsonify({'statusCode': 401, 'statusMessage': 'Token JWT tidak ditemukan'})
+    return decorated_function
 
-    return None
+def get_user_from_jwt(jwt_token):
+    try:
+        JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
+        decoded_token = jwt.decode(jwt_token, JWTkey, algorithms=['HS256'])
+        user = decoded_token.get('user1')
+        return user
+    except jwt.exceptions.InvalidTokenError:
+        return None
 
-# def jwt_required(func):
-#     @wraps(func)
-#     def decorated_function(*args, **kwargs):
-#         # Periksa header Authorization untuk mendapatkan token JWT
-#         auth_header = request.headers.get('Authorization')
-#         if auth_header:
-#             auth_token = auth_header.split(' ')[1]
-#             try:
-#                 # Verifikasi token JWT
-#                 jwt.decode(auth_token, algorithms='HS256')
-#                 return func(*args, **kwargs)
-#             except (jwt.exceptions.DecodeError, jwt.exceptions.InvalidTokenError):
-#                 return jsonify({'statusCode': 401, 'statusMessage': 'Token JWT tidak valid'})
-#         else:
-#             return jsonify({'statusCode': 401, 'statusMessage': 'Token JWT tidak ditemukan'})
-#     return decorated_function
-
+# route 
 @bp.route('/register', methods=['POST'])
 def register():
     username = request.form.get('username')
     password = request.form.get('password')
-    public_key = request.form.get('publicKey')
-    private_key = request.form.get('privateKey')
 
     # Enkripsi username
     encrypted_username = encrypt(username)
@@ -83,9 +87,17 @@ def register():
     if any(query):
         return jsonify({'statusCode': 400, 'statusMessage': 'Username sudah terdaftar'})
 
-    # Enkripsi data kecuali password
-    encrypted_public_key = encrypt(public_key)
-    encrypted_private_key = encrypt(private_key)
+    # Generate pasangan kunci RSA baru
+    public_key, private_key = rsa.newkeys(2048)
+
+    # Konversi kunci RSA ke format string
+    public_key_str = public_key.save_pkcs1().decode()
+    private_key_str = private_key.save_pkcs1().decode()
+    # print('public_key = '+public_key_str + '\nprivate_key = '+private_key_str)
+
+    # Enkripsi kunci RSA
+    encrypted_public_key = encrypt(public_key_str)
+    encrypted_private_key = encrypt(private_key_str)
 
     # Hash password
     hashed_password = hash_password(password)
@@ -127,11 +139,20 @@ def login():
     return jsonify({'statusCode': 401, 'statusMessage': 'Login gagal'})
 
 @bp.route('/search', methods=['POST'])
+@jwt_required
 def search():
+    # Ambil user1 dari token JWT
+    jwt_token = request.headers.get('Authorization').split(' ')[1]
+    user_from_jwt = get_user_from_jwt(jwt_token)
+
     # Periksa parameter 'username' untuk mendapatkan username yang ingin dicari
     username = request.form.get('username')
 
     if username:
+        # Periksa apakah username dari permintaan sama dengan user1 dalam token JWT
+        if user_from_jwt == username:
+            return jsonify({'statusCode': 404, 'statusMessage': 'Username tidak ditemukan'})
+
         # Enkripsi username
         encrypted_username = encrypt(username)
 
@@ -140,6 +161,42 @@ def search():
         if any(query):
             return jsonify({'statusCode': 200, 'statusMessage': 'Username ditemukan', 'username': username})
 
-        return jsonify({'statusCode': 404, 'statusMessage': 'Username tidak ditemukan'})
-    else:
-        return jsonify({'statusCode': 400, 'statusMessage': 'Parameter username tidak ditemukan'})
+    return jsonify({'statusCode': 400, 'statusMessage': 'Parameter username tidak ditemukan'})
+
+@bp.route('/add', methods=['POST'])
+@jwt_required
+def add_chat():
+    # Mendapatkan data dari JWT
+    jwt_token = request.headers.get('Authorization').split(' ')[1]
+    username_jwt = get_user_from_jwt(jwt_token)
+
+    # Mendapatkan username dari parameter request
+    username_request = request.form.get('username')
+
+    # Mendapatkan ID pengguna dari database berdasarkan username
+    id_user1 = username_jwt
+    id_user2 = username_request
+
+    # Periksa apakah pengguna dengan username_request ada di database
+    if not id_user2:
+        return jsonify({'statusCode': 404, 'statusMessage': 'User not found'})
+
+    # Enkripsi ID pengguna
+    encrypted_id_user1 = encrypt(id_user1)
+    encrypted_id_user2 = encrypt(id_user2)
+
+    # Periksa apakah pasangan idUser1 dan idUser2 sudah ada dalam tabel chat
+    chat_query = chat_collection.where('idUser1', 'in', [encrypted_id_user1, encrypted_id_user2]).where('idUser2', 'in', [encrypted_id_user1, encrypted_id_user2]).limit(1).stream()
+    if any(chat_query):
+        return jsonify({'statusCode': 409, 'statusMessage': 'Chat already exists'})
+
+    # Menyimpan data chat ke dalam tabel
+    new_chat = {
+        'idUser1': encrypted_id_user1,
+        'idUser2': encrypted_id_user2,
+        'createdAt': datetime.now(),
+        'updatedAt': datetime.now()
+    }
+    chat_collection.add(new_chat)
+
+    return jsonify({'statusCode': 200, 'statusMessage': 'Chat added successfully'})
