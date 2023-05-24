@@ -19,6 +19,7 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 users_collection = db.collection('users')
 chat_collection = db.collection('chats')
+messages_collection = db.collection('messages')
 
 # Inisialisasi blueprint
 bp = Blueprint('routes', __name__)
@@ -26,6 +27,8 @@ bp = Blueprint('routes', __name__)
 # Konfigurasi enkripsi AES
 key = b'x\x800\xe4\x97\x9e%]LE\x7f8\x0e\xae\xb2\xd6\xa4p\xc3Ug\xcc\xaaw\xe8\xd5\xd6\x1e\x18\xa2\xd6\x91'  # Ganti dengan kunci rahasia yang kuat
 cipher = AES.new(key, AES.MODE_ECB)
+
+JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
 
 def encrypt(text):
     encrypted_text = cipher.encrypt(pad(text.encode(), AES.block_size))
@@ -41,7 +44,6 @@ def hash_password(password):
     return hashed_password
 
 def generate_jwt(username):
-    JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
     payload = {'user1': username}
     jwt_token = jwt.encode(payload, JWTkey, algorithm='HS256')
     return jwt_token
@@ -54,7 +56,7 @@ def jwt_required(func):
         if auth_header:
             auth_token = auth_header.split(' ')[1]
             try:
-                JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
+                
                 # Verifikasi token JWT
                 jwt.decode(auth_token, JWTkey, algorithms='HS256')
                 return func(*args, **kwargs)
@@ -66,7 +68,7 @@ def jwt_required(func):
 
 def get_user_from_jwt(jwt_token):
     try:
-        JWTkey = "iOA_yJCQUPl2Ath4KJmWouI8lb-ZWiyUxzv_J1q0r-WRLZda4g4Fvt_tBnFNhTXCHcaWYHYbHpfBK2oIwt9i8PtE0rE5_HxnwVEBZWr2veP6fMFqKmUnmHw-VKPiXEehV77RHmNkuBcahMo5beJf636_0gk5mSsBSOeagFtZaWg"
+        
         decoded_token = jwt.decode(jwt_token, JWTkey, algorithms=['HS256'])
         user = decoded_token.get('user1')
         return user
@@ -200,3 +202,61 @@ def add_chat():
     chat_collection.add(new_chat)
 
     return jsonify({'statusCode': 200, 'statusMessage': 'Chat added successfully'})
+
+@bp.route('/getChat', methods=['GET'])
+@jwt_required
+def get_chat():
+    # Mendapatkan user1 dari token JWT
+    jwt_token = request.headers.get('Authorization').split(' ')[1]
+    user1 = get_user_from_jwt(jwt_token)
+
+    # Enkripsi username user1
+    encrypted_user1 = encrypt(user1)
+
+    # Mencari chat dengan idUser1 atau idUser2 berisi user1
+    query = chat_collection.where('idUser1', 'in', [encrypted_user1]).stream()
+    chats = []
+    for chat in query:
+        idUser2 = decrypt(chat.get('idUser2'))
+        updatedAt = chat.get('updatedAt').strftime("%Y-%m-%d %H:%M:%S")
+        chats.append({'idChat': chat.id, 'username': idUser2, 'updatedAt': updatedAt})
+
+    query = chat_collection.where('idUser2', 'in', [encrypted_user1]).stream()
+    for chat in query:
+        idUser1 = decrypt(chat.get('idUser1'))
+        updatedAt = chat.get('updatedAt').strftime("%Y-%m-%d %H:%M:%S")
+        chats.append({'idChat': chat.id, 'username': idUser1, 'updatedAt': updatedAt})
+
+    return jsonify({'statusCode': 200, 'statusMessage': 'Success', 'chats': chats})
+
+@bp.route('/sendMessage', methods=['POST'])
+@jwt_required
+def send_message():
+    # Mendapatkan data dari JWT
+    jwt_token = request.headers.get('Authorization').split(' ')[1]
+    id_sender = get_user_from_jwt(jwt_token)
+
+    # Mendapatkan data dari request
+    id_chat = request.form.get('idChat')
+    message_in = request.form.get('messageIn')
+    message_out = request.form.get('messageOut')
+
+    # Mengecek apakah id_chat ada dalam koleksi chats
+    chat_doc = chat_collection.document(id_chat).get()
+    if not chat_doc.exists:
+        return jsonify({'statusCode': 404, 'statusMessage': 'Chat not found'})
+
+    # Mengupdate updatedAt pada chat
+    chat_doc.reference.update({'updatedAt': datetime.now()})
+
+    # Menyimpan data message ke koleksi messages
+    new_message = {
+        'idChat': id_chat,
+        'idSender': id_sender,
+        'messageIn': message_in,
+        'messageOut': message_out,
+        'timestamp': datetime.now()
+    }
+    messages_collection.add(new_message)
+
+    return jsonify({'statusCode': 200, 'statusMessage': 'Message sent successfully'})
