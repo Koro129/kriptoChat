@@ -260,3 +260,65 @@ def send_message():
     messages_collection.add(new_message)
 
     return jsonify({'statusCode': 200, 'statusMessage': 'Message sent successfully'})
+
+@bp.route('/listMessage', methods=['POST'])
+@jwt_required
+def list_message():
+    # Get user1 from JWT token
+    jwt_token = request.headers.get('Authorization').split(' ')[1]
+    user1 = get_user_from_jwt(jwt_token)
+
+    # Get idChat from form data
+    id_chat = request.form.get('idChat')
+
+    # Check if chat document exists
+    chat_doc = chat_collection.document(id_chat).get()
+    if not chat_doc.exists:
+        return jsonify({'statusCode': 404, 'statusMessage': 'Chat not found'})
+
+
+    # Get chat data
+    chat_data = chat_doc.to_dict()
+    encrypted_id_user1 = chat_data['idUser1']
+    encrypted_id_user2 = chat_data['idUser2']
+
+    # Decrypt idUser1 and idUser2
+    id_user1 = decrypt(encrypted_id_user1)
+    id_user2 = decrypt(encrypted_id_user2)
+
+    # Ensure user1 and user2 are as per the rule
+    if user1 == id_user1:
+        user1, user2 = id_user2, id_user1
+    elif user1 == id_user2:
+        user1, user2 = id_user1, id_user2
+    else:
+        return jsonify({'statusCode': 403, 'statusMessage': 'Forbidden'})
+
+    # Retrieve user2's document from the user collection
+    user2_query = users_collection.where('username', '==', encrypt(user2)).limit(1).stream()
+    user2_doc = next(user2_query, None)
+    if not user2_doc:
+        return jsonify({'statusCode': 404, 'statusMessage': 'User not found'})
+    user2_data = user2_doc.to_dict()
+    user2_public_key = decrypt(user2_data.get('publicKey'))
+
+    # Retrieve user1's document from the user collection
+    user1_query = users_collection.where('username', '==', encrypt(user1)).limit(1).stream()
+    user1_doc = next(user1_query, None)
+    if not user1_doc:
+        return jsonify({'statusCode': 404, 'statusMessage': 'User not found'})
+    user1_data = user1_doc.to_dict()
+    user1_private_key = decrypt(user1_data.get('privateKey'))
+
+    # Get all messages with the same idChat
+    messages_query = messages_collection.where('idChat', '==', id_chat).stream()
+    messages = [message_doc.to_dict() for message_doc in messages_query]
+
+    # Prepare response with user2's public key, user1's private key, and all messages
+    response_data = {
+        'user2Key': user2_public_key,
+        'user1Key': user1_private_key,
+        'messages': messages
+    }
+
+    return jsonify(response_data)
