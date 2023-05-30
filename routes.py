@@ -316,6 +316,8 @@ def list_message():
 
     # Prepare response with user2's public key, user1's private key, and all messages
     response_data = {
+        'statusCode': 200,
+        'statusMessage': 'list messages success',
         'user2Key': user2_public_key,
         'user1Key': user1_private_key,
         'messages': messages
