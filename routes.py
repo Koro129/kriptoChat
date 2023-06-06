@@ -269,7 +269,7 @@ def list_message():
     user1 = get_user_from_jwt(jwt_token)
 
     # Get idChat from form data
-    id_chat = request.form.get('idChat')
+    id_chat = request.args.get('idChat')
 
     # Check if chat document exists
     chat_doc = chat_collection.document(id_chat).get()
