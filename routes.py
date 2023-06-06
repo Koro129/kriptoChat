@@ -261,7 +261,7 @@ def send_message():
 
     return jsonify({'statusCode': 200, 'statusMessage': 'Message sent successfully'})
 
-@bp.route('/listMessage', methods=['POST'])
+@bp.route('/listMessage', methods=['GET'])
 @jwt_required
 def list_message():
     # Get user1 from JWT token
