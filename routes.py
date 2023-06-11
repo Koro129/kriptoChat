@@ -314,6 +314,9 @@ def list_message():
     messages_query = messages_collection.where('idChat', '==', id_chat).stream()
     messages = [message_doc.to_dict() for message_doc in messages_query]
 
+    # Sort the messages by timestamp
+    messages.sort(key=lambda x: x['timestamp'])
+    
     # Prepare response with user2's public key, user1's private key, and all messages
     response_data = {
         'statusCode': 200,
