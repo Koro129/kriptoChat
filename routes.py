@@ -311,6 +311,7 @@ def list_message():
         return jsonify({'statusCode': 404, 'statusMessage': 'User not found'})
     user1_data = user1_doc.to_dict()
     user1_private_key = decrypt(user1_data.get('privateKey'))
+    user1_public_key = decrypt(user1_data.get('publicKey'))
 
     # Get all messages with the same idChat
     messages_query = messages_collection.where('idChat', '==', id_chat).stream()
@@ -330,7 +331,8 @@ def list_message():
         'statusCode': 200,
         'statusMessage': 'list messages success',
         'user2Key': user2_public_key,
-        'user1Key': user1_private_key,
+        'user1PrivateKey': user1_private_key,
+        'user1PublicKey': user1_public_key,
         'messages': decrypted_messages
     }
 
