@@ -180,7 +180,8 @@ def add_chat():
     id_user2 = username_request
 
     # Periksa apakah pengguna dengan username_request ada di database
-    if not id_user2:
+    user_query = users_collection.where('username', '==', encrypt(username_request)).limit(1).stream()
+    if not any(user_query):
         return jsonify({'statusCode': 404, 'statusMessage': 'User not found'})
 
     # Enkripsi ID pengguna
