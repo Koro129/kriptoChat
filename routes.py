@@ -253,9 +253,9 @@ def send_message():
     # Menyimpan data message ke koleksi messages
     new_message = {
         'idChat': id_chat,
-        'idSender': id_sender,
-        'messageIn': message_in,
-        'messageOut': message_out,
+        'idSender': encrypt(id_sender),
+        'messageIn': encrypt(message_in),
+        'messageOut': encrypt(message_out),
         'timestamp': datetime.now()
     }
     messages_collection.add(new_message)
@@ -271,6 +271,7 @@ def list_message():
 
     # Get idChat from form data
     id_chat = request.args.get('idChat')
+    print(id_chat)
 
     # Check if chat document exists
     chat_doc = chat_collection.document(id_chat).get()
@@ -315,16 +316,22 @@ def list_message():
     messages_query = messages_collection.where('idChat', '==', id_chat).stream()
     messages = [message_doc.to_dict() for message_doc in messages_query]
 
-    # Sort the messages by timestamp
-    messages.sort(key=lambda x: x['timestamp'])
-    
+    # Decrypt messages (except for the "idChat" field)
+    decrypted_messages = []
+    for message in messages:
+        decrypted_message = message.copy()  # Copy the message dictionary
+        for key, value in message.items():
+            if key not in ['idChat', 'timestamp']:
+                decrypted_message[key] = decrypt(value)
+        decrypted_messages.append(decrypted_message)
+
     # Prepare response with user2's public key, user1's private key, and all messages
     response_data = {
         'statusCode': 200,
         'statusMessage': 'list messages success',
         'user2Key': user2_public_key,
         'user1Key': user1_private_key,
-        'messages': messages
+        'messages': decrypted_messages
     }
 
     return jsonify(response_data)
