@@ -326,6 +326,8 @@ def list_message():
                 decrypted_message[key] = decrypt(value)
         decrypted_messages.append(decrypted_message)
 
+    decrypted_messages.sort(key=lambda x: x['timestamp'])
+
     # Prepare response with user2's public key, user1's private key, and all messages
     response_data = {
         'statusCode': 200,
